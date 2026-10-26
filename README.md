@@ -1,65 +1,163 @@
-# Bedrock & Bedrock Mantle 测试系统 + AWS Support 工单读取
+# Bedrock & Mantle 多账户监控系统
+# AWS Bedrock & Mantle Multi-Account Monitoring Dashboard
 
-一体化工具:用 AWS 访问密钥验证身份、批量测试 Amazon Bedrock 原生模型与 Bedrock Mantle 模型,
-并读取 AWS Support 工单详情。提供**命令行**与**浏览器 UI**两种用法。
+> English version below | 英文版在中文版之后
 
-## 目录
-- `core.py` - 共用核心逻辑(凭证校验 / Mantle / Bedrock / 工单),返回纯数据,供 CLI 与 Web 共用
-- `bedrock_system.py` - 命令行入口
-- `ui_server.py` - 本地 Web 服务(标准库 http.server,无额外依赖)
-- `static/index.html` - 单文件前端(含样式与脚本)
-- `config.json` - 区域、Mantle 端点、模型清单
+---
 
-## 凭证(重要)
-脚本**不硬编码任何密钥**。CLI 用环境变量,UI 用浏览器 localStorage。
-```powershell
-$env:AWS_ACCESS_KEY_ID="AKIA...."
-$env:AWS_SECRET_ACCESS_KEY="...."
-$env:AWS_DEFAULT_REGION="us-east-1"
-```
-AWS Support 接口只在 `us-east-1` / `us-west-2` 提供。
+## 一、项目简介 | Project Overview
 
-## 🖥️ 浏览器 UI（推荐）
-密钥存在浏览器 localStorage（**支持同时保存多个账户**），每次请求发给本地服务，不上传任何远程服务器。
-```powershell
+**bedrock-mantle-system** 是一套运行在本地的 AWS Bedrock / Mantle 多账户监控看板，支持：
+
+- 🔑 多账户 AK/SK 管理（本地存储，无云端泄露）
+- 🤖 模型连通性批量测试（Bedrock 20 + Mantle 44 个模型）
+- 🎫 AWS Support 工单实时读取（支持中文、含最新消息时间）
+- 📊 CloudWatch 指标 · 成本拆分 · 服务配额（3 条配额实时查询）
+- 💓 账户健康探测（Bedrock 控制面 ListFoundationModels）
+- 🖥️ 浏览器 UI（单页看板，两列布局，支持成本开关）
+- ⚡ 本地 Python HTTP 服务（绕过 CORS，SSE SigV4 鉴权）
+
+项目地址：https://github.com/temmplar47/bedrock-mantle-system
+
+---
+
+## 二、快速启动 | Quick Start
+
+```bash
+# 1. 克隆
+git clone https://github.com/temmplar47/bedrock-mantle-system.git
 cd bedrock-mantle-system
-python3 ui_server.py            # 默认 http://127.0.0.1:8899 并自动打开浏览器
-python3 ui_server.py --port 9000 --no-browser
-```
-打开后:
-1. 「AWS 账户管理」卡片可**添加多个账户**（名称 + AK/SK/Region，添加时自动验证）;点「设为当前」切换;
-2. 切到 **Mantle 模型测试** / **Bedrock 原生测试** / **工单读取** 三个选项卡，使用当前账户运行;
-3. 工单选项卡有 **📨 读取所有账户工单**，一次性遍历全部已保存账户并分组展示工单。
 
-架构:浏览器(存密钥) → 本地服务(ui_server.py) → 复用 core.py 调 AWS。
-因 AWS 接口不允许浏览器跨域直连,所有 AWS 调用由本地服务完成,规避 CORS。
+# 2. 安装依赖
+pip install boto3 botocore
 
-⚠️ 安全:localStorage 为明文,请勿在共享/公共电脑使用;测试后建议到 AWS 控制台轮转密钥。
+# 3. 启动服务（自动打开浏览器）
+python ui_server.py --port 8899
 
-## 命令行用法
-```powershell
-python3 bedrock_system.py auth                              # 验证密钥
-python3 bedrock_system.py bedrock --filter qwen              # 原生 Bedrock(按子串过滤)
-python3 bedrock_system.py mantle --filter gemma              # Mantle(遇 route 错误自动切 /openai/v1)
-python3 bedrock_system.py tickets --filter 1787968602 --full # 工单(可含完整通信)
-python3 bedrock_system.py all                                # 验证 + Bedrock + Mantle
+# 4. 访问看板
+open http://127.0.0.1:8899
 ```
 
-## 工单字段映射(需求 8 项)
-| 需求字段 | AWS Support 字段 |
-|---------|-----------------|
-| 主题     | subject |
-| 案例 ID  | caseId (展示ID: displayId) |
-| 创建时间 | timeCreated |
-| 工单类型 | serviceCode |
-| 状态     | status |
-| 严重性   | severityCode |
-| 类别     | categoryCode |
-| 最新消息 | recentCommunications[0].body |
+添加账户：进入「账户」标签页 → 填写 Access Key ID / Secret Access Key → 点「添加账户」。
 
-## 技术要点
-- **Bedrock 原生**: boto3 `bedrock-runtime.converse`;命中 invalid/operation-not-allowed 时尝试 inference-profile 回退。
-- **Bedrock Mantle**: botocore `SigV4Auth` 以 service=`bedrock-mantle` 签名 OpenAI 格式请求;
-  命中 route 错误时切到 `/openai/v1/chat/completions` 重试。
-- **安全提醒**:账户 457508561572 曾出现密钥泄露工单(类别 notification-exposed-key),
-  AWS 已删除 IAM 用户 MantleApiKey-56h0cunr,请测试后及时轮转密钥。
+---
+
+## 三、界面预览 | UI Overview
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  Bedrock · Mantle · 多账户监控看板          [成本] 关闭   │
+├──────────┬──────────┬──────────┬──────────┬─────────────┤
+│ Dashboard │ Mantle测试│ Bedrock测试│ 工单     │ 账户         │
+├──────────┴──────────┴──────────┴──────────┴─────────────┤
+│                                                          │
+│  ┌─────────────┐  ┌─────────────┐                        │
+│  │ Zerus Tech  │  │ Account-45… │                        │
+│  │ Bedrock [OK]│  │ Bedrock [!] │                        │
+│  │ Mantle [OK] │  │ Mantle [ERR]│                        │
+│  │ [配额|健康] │  │ [配额|健康] │                        │
+│  │ 工单(Urgent)│  │ 工单(None)  │                        │
+│  └─────────────┘  └─────────────┘                        │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 四、API 端点 | API Endpoints
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/` | GET | 浏览器看板 |
+| `/api/auth` | POST | 验证 AK/SK 是否有效 |
+| `/api/sts-name` | POST | 获取账户名（优先 Organizations 名） |
+| `/api/dashboard` | POST | 返回所有账户模型测试结果 + 工单 |
+| `/api/cloudwatch` | POST | 返回 CW 指标 + 成本 + 配额 + 健康 |
+| `/api/mantle` | POST | 批量测试 Mantle 模型（支持 filter 过滤） |
+| `/api/bedrock` | POST | 批量测试 Bedrock 模型 |
+| `/api/tickets` | POST | 读取 Support 工单（支持 status/severity 过滤） |
+
+---
+
+## 五、技术架构 | Architecture
+
+```
+[Browser UI]  --(localStorage 密钥)-->  [Python HTTP :8899]
+                                           |
+                                    [core.py SigV4]
+                                           |
+                                    [AWS Bedrock / Mantle API]
+                                           |
+                                    [AWS Support / CloudWatch / Cost Explorer]
+```
+
+**Mantle Anthropic 模型路由**：`/anthropic/v1/messages`（而非 `/v1/messages`，后者在 Mantle 网关未配置）。
+
+**鉴权**：所有调用均通过 AWS SigV4（service=bedrock-mantle）签名，无云端中转。
+
+---
+
+## 六、配置文件 | Configuration
+
+`config.json` 定义了 64 个模型的路由与参数：
+
+```json
+{
+  "mantle": [
+    {"id": "anthropic.claude-haiku-4-5", "route1_path": "/anthropic/v1/messages", "sigv4_service": "bedrock-mantle"},
+    {"id": "openai.gpt-5.6-luna", "route1_path": "/v1/chat/completions", "route2_path": "/openai/v1/chat/completions", ...}
+  ],
+  "bedrock": [
+    {"id": "anthropic.claude-opus-4-6-v1", "apiId": "global.anthropic.claude-opus-4-6-v1", ...},
+    {"id": "openai.gpt-5.6-terra", "apiId": "global.openai.gpt-5.6-terra", ...}
+  ]
+}
+```
+
+---
+
+## 七、已知问题与解决 | Known Issues & Fixes
+
+### Mantle Haiku /v1/messages 404
+**问题**：POST `/v1/messages` 返回空 404，以为是沙箱网络问题。
+**根因**：Mantle 网关将 Messages 路由挂在 `/anthropic/v1/messages`，`/v1/messages` 根本未配置。
+**修复**：core.py `mantle_chat` 对 anthropic 前缀模型改走 `/anthropic/v1/messages`（2026-10-26）。
+
+### 强刷 URL 返回 404
+**问题**：`do_GET` 只匹配精确路径 `/`，带查询参数 `?v=xxx` 全部返回 404。
+**修复**：ui_server.py 用 `path.split("?")[0]` 归一化路径后匹配（v241026a）。
+
+---
+
+## License | 许可证
+
+MIT License
+
+---
+
+## English Version
+
+### AWS Bedrock & Mantle Multi-Account Monitoring Dashboard
+
+**bedrock-mantle-system** is a local-first multi-account monitoring dashboard for AWS Bedrock and Mantle APIs. No cloud relay, no credentials stored externally — everything runs on your machine.
+
+**Key Features:**
+- 🔑 Multi-account AK/SK management (stored in browser localStorage)
+- 🤖 Batch model connectivity testing (20 Bedrock + 44 Mantle models)
+- 🎫 AWS Support ticket reader (with latest message time, Chinese-friendly)
+- 📊 CloudWatch metrics, Cost Explorer breakdowns, Service Quotas (3 quotas live)
+- 💓 Account health probe via Bedrock `ListFoundationModels`
+- 🖥️ Browser UI with two-column layout, cost toggle, real-time refresh
+- ⚡ Local Python HTTP server (bypasses CORS, SigV4-signed to AWS)
+
+**Quick Start:**
+```bash
+pip install boto3 botocore
+python ui_server.py --port 8899
+# open http://127.0.0.1:8899
+```
+
+**Tech Stack:** Python 3 · boto3/botocore · SigV4 · HTML5/JS (no framework) · AWS Support API · CloudWatch GetMetricData · Cost Explorer
+
+**Source:** https://github.com/temmplar47/bedrock-mantle-system
+
+**Haiku Fix Story:** The Mantle gateway does NOT expose `/v1/messages` — that path returns an empty 404 at the API Gateway layer. The actual Anthropic Messages endpoint lives at `/anthropic/v1/messages` with header `anthropic-workspace-id: default` and `anthropic-version: 2026-10-21`. The fix was discovered through systematic path probing and confirmed with a real 200 response including Anthropic-formatted JSON.
