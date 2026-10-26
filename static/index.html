@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>Bedrock · Mantle · 多账户监控 v241026a</title>
+<style>
+:root{
+  --bg:#0b0f1a; --panel:#131929; --panel2:#1b2235; --border:#252f48;
+  --text:#d8e2f4; --muted:#6b7fa3; --accent:#4f8cff; --accent2:#23c4a7;
+  --ok:#34d399; --err:#f87171; --warn:#fbbf24; --info:#60a5fa;
+  --sev-urgent:#ef4444; --sev-high:#f97316; --sev-normal:#3b82f6;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,
+    "PingFang SC","Microsoft YaHei",sans-serif;
+  background:var(--bg);color:var(--text);line-height:1.55;font-size:14px;
+}
+a{color:var(--accent);text-decoration:none}
+code{font-family:Consolas,monospace;font-size:12px;background:var(--panel2);
+     padding:1px 5px;border-radius:4px}
+
+/* ── header ── */
+header{
+  background:var(--panel);border-bottom:1px solid var(--border);
+  padding:0 24px;display:flex;align-items:center;height:56px;gap:0;
+  position:sticky;top:0;z-index:100;
+}
+.logo{font-size:16px;font-weight:700;color:var(--text);white-space:nowrap;margin-right:28px}
+.logo span{color:var(--accent)}
+header .subtitle{color:var(--muted);font-size:12px;margin-left:8px}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0}
+.status-dot.live{background:var(--ok);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* ── nav ── */
+nav{
+  background:var(--panel);border-bottom:1px solid var(--border);
+  padding:0 24px;display:flex;gap:0;
+  position:sticky;top:56px;z-index:99;
+}
+nav button{
+  background:none;border:none;border-bottom:2px solid transparent;
+  color:var(--muted);padding:11px 16px;cursor:pointer;font-size:13px;
+  font-weight:600;font-family:inherit;transition:.15s;white-space:nowrap;
+}
+nav button:hover{color:var(--text)}
+nav button.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* ── main ── */
+.wrap{max-width:1300px;margin:0 auto;padding:24px 24px 60px}
+.panel{
+  background:var(--panel);border:1px solid var(--border);
+  border-radius:12px;padding:20px;margin-bottom:18px;
+}
+.panel-head{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+.panel-head h2{font-size:15px;font-weight:600}
+
+.badge{
+  display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;
+  font-size:11px;font-weight:700;letter-spacing:.3px;
+}
+.badge.ok{background:rgba(52,211,153,.12);color:var(--ok)}
+.badge.err{background:rgba(248,113,113,.12);color:var(--err)}
+.badge.warn{background:rgba(251,191,36,.12);color:var(--warn)}
+.badge.info{background:rgba(96,165,250,.12);color:var(--info)}
+.badge.sev-urgent{background:rgba(239,68,68,.15);color:var(--sev-urgent)}
+.badge.sev-high{background:rgba(249,115,22,.15);color:var(--sev-high)}
+.badge.sev-normal{background:rgba(59,130,246,.15);color:var(--sev-normal)}
+.spinner{
+  display:inline-block;width:11px;height:11px;border:2px solid currentColor;
+  border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── tabs ── */
+.tabpane{display:none}
+.tabpane.active{display:block}
+
+/* ── dashboard grid ── */
+.dash-empty{
+  text-align:center;padding:60px 20px;color:var(--muted);font-size:14px;
+}
+.dash-empty p{margin:6px 0 20px}
+.acct-card{
+  background:var(--panel2);border:1px solid var(--border);border-radius:12px;
+  margin-bottom:20px;overflow:hidden;
+}
+/* 看板：账户卡 2 列；仅一个账户时占满整行 */
+#dashList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;align-items:start}
+#dashList>.acct-card{margin-bottom:0}
+#dashList>.acct-card:only-child{grid-column:1/-1}
+@media(max-width:1160px){#dashList{grid-template-columns:1fr}}
+.acct-hdr{
+  background:linear-gradient(135deg,#1b2235 0%,#1e2744 100%);
+  padding:13px 18px;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+}
+.acct-name{font-size:15px;font-weight:700}
+.acct-meta{font-size:12px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap}
+.acct-verified{font-size:11px;color:var(--ok)}
+.acct-err{font-size:12px;color:var(--err)}
+.acct-body{padding:14px 18px}
+
+/* model grid */
+.model-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+@media(max-width:680px){.model-grid{grid-template-columns:1fr}}
+.model-cell{
+  background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:13px;
+}
+.model-cell-head{
+  display:flex;align-items:center;gap:6px;margin-bottom:9px;flex-wrap:wrap;
+}
+.model-icon{font-size:16px}
+.model-label{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;
+  letter-spacing:.5px}
+.model-id{font-size:11px;color:var(--accent);margin-left:auto;font-family:monospace;overflow-wrap:anywhere;min-width:0}
+.model-status{margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.model-status .t{font-size:13px;font-weight:600}
+.model-status .el{font-size:11px;color:var(--muted);margin-left:auto}
+.model-snippet{
+  font-size:12px;color:var(--muted);margin-top:6px;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;
+  overflow:hidden;word-break:break-word;
+}
+.model-snippet pre{white-space:pre-wrap;word-break:break-all;margin:0;font-size:12px}
+.model-err{font-size:12px;color:var(--err);margin-top:5px}
+.route-tag{font-size:10px;color:var(--warn);margin-left:4px}
+.via-tag{font-size:10px;color:var(--accent2);margin-left:4px}
+
+/* tickets */
+.ticket-sec{
+  padding-top:14px;border-top:1px solid var(--border);margin-top:0;
+}
+.ticket-hdr{
+  font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;
+  letter-spacing:.5px;margin-bottom:9px;
+}
+.ticket-row{
+  background:var(--bg);border:1px solid var(--border);border-radius:9px;
+  padding:11px 13px;margin-bottom:7px;
+}
+.ticket-top{display:flex;align-items:flex-start;gap:7px;flex-wrap:wrap;margin-bottom:5px}
+.ticket-subj{font-size:13px;font-weight:600;flex:1}
+.ticket-meta{font-size:11px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap}
+.ticket-meta span{display:flex;align-items:center;gap:3px}
+.ticket-msg{
+  font-size:12px;color:var(--muted);margin-top:5px;
+  background:var(--panel2);border-radius:7px;padding:7px 9px;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
+}
+
+/* cw metrics (from bedrock-dashboard) */
+.cw-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}
+@media(max-width:600px){.cw-grid{grid-template-columns:1fr 1fr}}
+.cw-cell{background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:11px 13px;text-align:center}
+.cw-val{font-size:20px;font-weight:700;color:var(--accent)}
+.cw-lbl{font-size:11px;color:var(--muted);margin-top:3px}
+
+/* kv rows (quota / health) */
+.kv-grid{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+.kv-row{display:flex;justify-content:space-between;gap:12px;font-size:12px;align-items:baseline}
+.kv-k{color:var(--muted)}
+.kv-k small{opacity:.7}
+.kv-v{font-weight:600;text-align:right;word-break:break-all}
+.kv-v.ok{color:var(--ok)}
+.kv-v.err{color:var(--bad)}
+
+/* ── account forms ── */
+.row{display:flex;gap:12px;flex-wrap:wrap}
+.col{flex:1;min-width:160px}
+label{display:block;font-size:11px;color:var(--muted);font-weight:600;
+  text-transform:uppercase;letter-spacing:.4px;margin:10px 0 5px}
+input[type=text],input[type=password],input[type=number]{
+  width:100%;background:var(--bg);border:1px solid var(--border);
+  color:var(--text);padding:9px 11px;border-radius:8px;font-size:13px;font-family:inherit;
+}
+input:focus{outline:none;border-color:var(--accent)}
+input::placeholder{color:var(--muted)}
+.eye{font-size:11px;cursor:pointer;color:var(--accent);user-select:none;margin-left:8px}
+
+/* ── buttons ── */
+.btn{
+  cursor:pointer;border:none;border-radius:8px;padding:9px 18px;
+  font-size:13px;font-weight:700;font-family:inherit;
+  background:var(--accent);color:#fff;transition:.15s;display:inline-flex;
+  align-items:center;gap:6px;
+}
+.btn:hover{filter:brightness(1.12)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.ghost{background:var(--bg);color:var(--text);border:1px solid var(--border)}
+.btn.ghost:hover{background:var(--panel2)}
+.btn.sm{padding:6px 13px;font-size:12px}
+.btn.danger{background:rgba(248,113,113,.1);color:var(--err);border:1px solid rgba(248,113,113,.25)}
+.btn.danger:hover{background:rgba(248,113,113,.18)}
+.btn.accent2{background:rgba(35,196,167,.15);color:var(--accent2);border:1px solid rgba(35,196,167,.3)}
+.btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+
+/* ── account list ── */
+.acct-item{
+  border:1px solid var(--border);border-radius:10px;padding:11px 14px;
+  margin-bottom:8px;background:var(--bg);display:flex;align-items:center;gap:10px;
+}
+.acct-item.active{border-color:var(--accent)}
+.acct-item-info{flex:1;min-width:0}
+.acct-item-name{font-weight:600;font-size:14px}
+.acct-item-meta{font-size:11px;color:var(--muted);margin-top:2px}
+.acct-item .cur-tag{font-size:10px;color:var(--accent2);border:1px solid var(--accent2);border-radius:6px;padding:1px 7px;white-space:nowrap}
+.acct-list-empty{color:var(--muted);font-size:13px;font-style:italic;padding:10px 0}
+
+/* ── tables ── */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+.resp{color:var(--muted);font-size:12px;max-width:360px;word-break:break-word}
+.errmsg{color:var(--err);font-size:12px}
+.summary{margin-bottom:10px;font-size:13px;color:var(--muted)}
+.empty{color:var(--muted);font-size:13px;font-style:italic}
+.note{font-size:12px;color:var(--warn);background:rgba(251,191,36,.07);
+  border:1px solid rgba(251,191,36,.22);padding:10px 14px;border-radius:8px;margin-top:12px}
+.success{font-size:13px;color:var(--ok);margin-top:10px}
+.err-msg{font-size:13px;color:var(--err);margin-top:10px}
+
+/* ── refresh bar ── */
+.refresh-bar{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.refresh-bar .last{font-size:12px;color:var(--muted);margin-left:auto}
+.win-label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.win-label select{background:var(--bg);border:1px solid var(--border);color:var(--text);
+  padding:4px 8px;border-radius:6px;font-size:12px;font-family:inherit}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🧪 Bedrock <span>·</span> Mantle <span>监控</span></div>
+  <span class="subtitle">多账户 · 模型测试 · CloudWatch · 工单</span>
+  <div class="hdr-right">
+    <span class="status-dot" id="liveDot"></span>
+    <span id="liveLabel" style="font-size:12px;color:var(--muted)">未加载</span>
+  </div>
+</header>
+
+<nav>
+  <button class="active" data-nav="dashboard">📊 看板</button>
+  <button data-nav="mantle">⚡ Mantle 测试</button>
+  <button data-nav="bedrock">🪨 Bedrock 测试</button>
+  <button data-nav="tickets">🎫 工单读取</button>
+  <button data-nav="accounts">🔑 账户管理</button>
+</nav>
+
+<div class="wrap">
+
+  <!-- ══ DASHBOARD ══ -->
+  <div id="page-dashboard" class="tabpane active">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>📊 多账户看板</h2>
+        <span class="badge info" id="dashCount" style="display:none">0 账户</span>
+        <span class="badge" id="dashWin" style="background:rgba(79,140,255,.1);color:var(--accent)">最近 60 分钟</span>
+      </div>
+      <div class="refresh-bar">
+        <div class="win-label">
+          窗口：
+          <select id="dashWinSelect">
+            <option value="60">最近 1 小时</option>
+            <option value="360">最近 6 小时</option>
+            <option value="1440">最近 24 小时</option>
+            <option value="43200" selected>本月</option>
+          </select>
+        </div>
+        <button class="btn" id="dashRefresh">🔄 刷新</button>
+        <button class="btn ghost" id="dashAuto">
+          <span id="dashAutoLabel">[AUTO] 自动刷新 OFF</span>
+        </button>
+        <button class="btn ghost" id="dashCostToggle">
+          <span id="dashCostLabel">[成本] 关闭</span>
+        </button>
+        <span class="last" id="dashLast">—</span>
+      </div>
+      <div id="dashEmpty" class="dash-empty">
+        <p>没有保存任何账户。</p>
+        <button class="btn" onclick="navTo('accounts')">➕ 添加账户</button>
+      </div>
+      <div id="dashList"></div>
+    </div>
+  </div>
+
+  <!-- ══ MANTLE ══ -->
+  <div id="page-mantle" class="tabpane">
+    <div class="panel">
+      <div class="panel-head"><h2>⚡ Mantle 模型测试</h2></div>
+      <div class="row">
+        <div class="col">
+          <label>模型过滤（子串，多个空格分隔，留空测全部）</label>
+          <input type="text" id="mFilter" placeholder="例如：gemma qwen" />
+        </div>
+        <div class="col" style="max-width:200px;flex:none">
+          <label>测试提示词</label>
+          <input type="text" id="mPrompt" value="hi" />
+        </div>
+      </div>
+      <div class="btns">
+        <button class="btn" id="mRun">▶ 运行</button>
+        <button class="btn ghost" id="mAll">测全部 45 个</button>
+      </div>
+      <div id="mResult"><div class="empty">点击运行后在此显示结果。</div></div>
+    </div>
+  </div>
+
+  <!-- ══ BEDROCK ══ -->
+  <div id="page-bedrock" class="tabpane">
+    <div class="panel">
+      <div class="panel-head"><h2>🪨 Bedrock 原生测试</h2></div>
+      <div class="row">
+        <div class="col">
+          <label>模型过滤（子串，留空测默认清单）</label>
+          <input type="text" id="bFilter" placeholder="例如：nvidia claude" />
+        </div>
+        <div class="col" style="max-width:200px;flex:none">
+          <label>测试提示词</label>
+          <input type="text" id="bPrompt" value="hi" />
+        </div>
+      </div>
+      <div class="btns">
+        <button class="btn" id="bRun">▶ 运行</button>
+      </div>
+      <div class="note">部分模型为 Mantle 专属，原生 Converse 可能返回 operation-not-allowed；系统会尝试推理配置回退。</div>
+      <div id="bResult"><div class="empty">点击运行后在此显示结果。</div></div>
+    </div>
+  </div>
+
+  <!-- ══ TICKETS ══ -->
+  <div id="page-tickets" class="tabpane">
+    <div class="panel">
+      <div class="panel-head"><h2>🎫 AWS Support 工单</h2></div>
+      <div class="row">
+        <div class="col">
+          <label>过滤（caseId / 展示ID / 主题 子串，留空读全部）</label>
+          <input type="text" id="tFilter" placeholder="例如：1787968602" />
+        </div>
+      </div>
+      <div class="btns">
+        <button class="btn" id="tRun">▶ 读取当前账户</button>
+        <button class="btn accent2" id="tAll">📨 读取所有账户（全部工单）</button>
+        <label style="margin:0;font-size:13px;color:var(--muted);display:flex;align-items:center;gap:7px">
+          <input type="checkbox" id="tFull" style="width:auto" /> 含完整通信记录
+        </label>
+      </div>
+      <div id="tResult"><div class="empty">点击读取后在此显示工单详情。</div></div>
+    </div>
+  </div>
+
+  <!-- ══ ACCOUNTS ══ -->
+  <div id="page-accounts" class="tabpane">
+    <div class="panel">
+      <div class="panel-head"><h2>🔑 AWS 账户管理</h2></div>
+      <h3 style="font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;
+        letter-spacing:.5px;margin-bottom:10px">已保存账户</h3>
+      <div id="acctList"></div>
+      <div id="acctEmpty" class="acct-list-empty">还没有保存任何账户，请在下方添加。</div>
+      <h3 style="font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;
+        letter-spacing:.5px;margin:18px 0 10px">添加账户</h3>
+      <div class="row">
+        <div class="col" style="max-width:170px;flex:none">
+          <label>账户名称（自动获取，可留空）</label>
+          <input type="text" id="newName" placeholder="添加后自动获取" autocomplete="off" />
+        </div>
+        <div class="col">
+          <label>Access Key ID</label>
+          <input type="text" id="newAk" placeholder="AKIA..." autocomplete="off" />
+        </div>
+        <div class="col">
+          <label>Secret Access Key <span class="eye" id="eye">显示</span></label>
+          <input type="password" id="newSk" placeholder="..." autocomplete="off" />
+        </div>
+        <div class="col" style="max-width:120px;flex:none">
+          <label>Region</label>
+          <input type="text" id="newRegion" value="us-east-1" />
+        </div>
+      </div>
+      <div class="btns">
+        <button class="btn" id="addBtn">➕ 添加并验证</button>
+      </div>
+      <div id="addResult"></div>
+      <h3 style="font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;
+        letter-spacing:.5px;margin:18px 0 10px">批量添加账户</h3>
+      <p class="note">每行一个账户，支持两种分隔：逗号或空格（SK 含 <code>+</code> <code>/</code> 等符号时请用空格分隔）。格式：<code>AK SK</code> 或 <code>名称 AK SK</code>。Region 统一用下方输入框（默认 us-east-1）。</p>
+      <div class="row">
+        <div class="col" style="max-width:120px;flex:none">
+          <label>Region</label>
+          <input type="text" id="bulkRegion" value="us-east-1" />
+        </div>
+      </div>
+      <div class="row">
+        <div class="col">
+          <textarea id="bulkAkSk" rows="6" placeholder="AKIA5WLTS2PRBXUMKGF6 2YGsPZYwC0Ew+GXfPGU/XD8hafFkTxL5+OYr+Y7s\n我的账户 AKIA... SK..." style="width:100%;font-family:monospace;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px"></textarea>
+        </div>
+      </div>
+      <div class="btns">
+        <button class="btn" id="bulkAddBtn">📥 批量添加并验证</button>
+      </div>
+      <div id="bulkResult"></div>
+      <div class="note">
+        [!] 密钥仅保存在<strong>本浏览器</strong> localStorage（明文），仅发往 <code>127.0.0.1</code>。
+        勿在公共电脑使用，测试后建议到 AWS 控制台轮转密钥。
+      </div>
+    </div>
+  </div>
+
+</div><!-- /wrap -->
+
+<script>
+// ── helpers ──────────────────────────────────────────────────────────────────
+const LS_KEY_ACCTS  = 'bm_accounts_v2';
+const LS_KEY_ACTIVE = 'bm_active_v2';
+const LS_KEY_WIN    = 'bm_window_v2';
+const LS_KEY_COST   = 'bm_cost_v1';
+const AUTO_MS = 2 * 60 * 1000;
+const DASH_MODELS = {
+  bedrock: [
+    {id:'claude.opus-4-6',  displayName:'Claude Opus 4.6',
+     apiId:'global.anthropic.claude-opus-4-6-v1'},
+    {id:'global.openai.gpt-5.6-terra', displayName:'GPT-5.6 Terra',
+     apiId:'global.openai.gpt-5.6-terra'},
+  ],
+  mantle: [
+    {id:'anthropic.claude-haiku-4-5', displayName:'Claude Haiku 4.5 (Mantle)',
+     apiId:'anthropic.claude-haiku-4-5'},
+    {id:'openai.gpt-5.6-luna', displayName:'GPT-5.6 Luna (Mantle)',
+     apiId:'openai.gpt-5.6-luna'},
+  ],
+};
+
+function $(id){return document.getElementById(id)}
+function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]||''))}
+function maskAk(ak){return ak&&ak.length>8?ak.slice(0,4)+'…'+ak.slice(-4):ak||''}
+function ts(){return new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}
+function loading(el){el.innerHTML='<div style="padding:16px 0"><span class="spinner"></span> 执行中…</div>';}
+
+// ── localStorage ─────────────────────────────────────────────────────────────
+function loadAccts(){try{return JSON.parse(localStorage.getItem(LS_KEY_ACCTS)||'[]');}catch{return [];}}
+function saveAccts(a){localStorage.setItem(LS_KEY_ACCTS,JSON.stringify(a));}
+function activeId(){return localStorage.getItem(LS_KEY_ACTIVE)||'';}
+function activeAcct(){return loadAccts().find(a=>a.id===activeId())||null;}
+function getCreds(){
+  const a=activeAcct();if(!a)return null;
+  return {access_key:a.access_key,secret_key:a.secret_key,session_token:'',region:a.region};
+}
+
+// ── API helpers ──────────────────────────────────────────────────────────────
+async function api(path,payload,timeoutMs=90000){
+  const ctrl=new AbortController();
+  const tid=setTimeout(()=>ctrl.abort(),timeoutMs);
+  try{
+    const res=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal:ctrl.signal});
+    return await res.json();
+  }catch(e){
+    return {error: (e.name==='AbortError'?'请求超时（服务器无响应）':'网络错误：'+e.message)};
+  }finally{
+    clearTimeout(tid);
+  }
+}
+
+// ── nav ─────────────────────────────────────────────────────────────────────
+let autoTimer=null;
+function navTo(id){
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.nav===id));
+  document.querySelectorAll('.tabpane').forEach(p=>p.classList.toggle('active',p.id==='page-'+id));
+  if(id==='dashboard' && !autoTimer)$runDashboard();
+}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>navTo(b.dataset.nav));
+
+// ── model result cell ────────────────────────────────────────────────────────
+function modelCell(m, type){
+  const isPermWarn = m.err && (m.err.includes('[!]') || (m.err.includes('Anthropic') && m.err.includes('not allowed')));
+  const icon = type==='bedrock'?'🪨':'⚡';
+  const tag = m.ok
+    ?'<span class="badge ok">[OK] 成功</span>'
+    :`<span class="badge ${isPermWarn?'warn':'err'}">${isPermWarn?'[!] 无权限':'[ERR] 失败'}</span>`;
+  const elapsed = m.ok ? `<span class="el">${m.elapsed.toFixed(2)}s</span>` : '';
+  const extra = m.route&&m.route.includes('/openai')?`<span class="route-tag">备用路由</span>`:'';
+  const extra2 = m.via==='inference-profile'?`<span class="via-tag">推理配置</span>`:'';
+  const snippet = m.ok
+    ?`<div class="model-snippet"><pre>${esc(m.text.slice(0,150))}</pre></div>`
+    :`<div class="model-err" ${isPermWarn?'style="color:var(--warn)"':''}>${esc(m.err).split('\n')[0]}</div>`;
+  return `<div class="model-cell">
+    <div class="model-cell-head">
+      <span class="model-icon">${icon}</span>
+      <span class="model-label">${esc(m.displayName||m.shortId||m.modelId)}</span>
+      <span class="model-id">${esc(m.shortId||m.modelId)}</span>
+    </div>
+    <div class="model-status">${tag}${elapsed}${extra}${extra2}</div>
+    ${snippet}
+  </div>`;
+}
+
+// ── ticket rendering ─────────────────────────────────────────────────────────
+function sevClass(s){
+  if(s==='urgent'||s==='critical')return'sev-urgent';
+  if(s==='high'||s==='normal')return'sev-normal';
+  return'sev-normal';
+}
+function ticketStatusTag(s){
+  if(s==='resolved')return'<span class="badge ok">已解决</span>';
+  if(s==='customer-action-completed')return'<span class="badge warn">待确认</span>';
+  if(s==='opened')return'<span class="badge info">进行中</span>';
+  return`<span class="badge warn">${esc(s)}</span>`;
+}
+
+// ── cw metrics cell ─────────────────────────────────────────────────────────
+function cwCell(val, lbl, fmt){
+  const v = (fmt==='int'?Math.round(val).toLocaleString()
+            :fmt==='cost'?'$'+Number(val).toFixed(4)
+            :Number(val).toFixed(2)+'ms');
+  return `<div class="cw-cell"><div class="cw-val">${v}</div><div class="cw-lbl">${lbl}</div></div>`;
+}
+
+// ── render one account card ─────────────────────────────────────────────────
+function renderAcctCard(a){
+  const verified = a.verified;
+  const acctName = esc(a.name||a.account||'?');
+  const acctMeta = verified
+    ?`<span>账户 ${esc(a.account)}</span>${a.userId?`<span>UserId: ${esc(a.userId)}</span>`:''}`
+    :`<span class="acct-err">${esc(a.error||'验证失败')}</span>`;
+
+  // bedrock models
+  const brModels = (a.bedrock&&a.bedrock.models)||[];
+  const brCells = brModels.map(m=>modelCell(m,'bedrock')).join('');
+  // mantle models
+  const mtModels = (a.mantle&&a.mantle.models)||[];
+  const mtCells = mtModels.map(m=>modelCell(m,'mantle')).join('');
+
+  // tickets
+  const tickets = a.tickets||[];
+  const ticketHtml = tickets.length
+    ?`<div class="ticket-sec">
+        <div class="ticket-hdr">[!] 非 resolved 工单（${tickets.length}）</div>
+        ${tickets.map(t=>`
+          <div class="ticket-row">
+            <div class="ticket-top">
+              ${ticketStatusTag(t.status)}
+              <span class="badge ${sevClass(t.severityCode)}">${esc(t.severityCode||'—')}</span>
+              <span class="ticket-subj">${esc(t.subject)}</span>
+            </div>
+            <div class="ticket-meta">
+              <span>[ID] <code>${esc(t.caseId||'').slice(0,30)}…</code></span>
+              <span>[TAG] ${esc(t.serviceCode||'')} · ${esc(t.categoryCode||'')}</span>
+              <span>[TIME] ${esc((t.latestMessageTime||t.timeCreated||'').replace('T',' ').slice(0,16))}</span>
+            </div>
+            ${t.latestMessage?`<div class="ticket-msg">${esc(t.latestMessage)}</div>`:''}
+          </div>`).join('')}
+      </div>`
+    :`<div class="ticket-sec"><div class="ticket-hdr">工单</div><div style="font-size:12px;color:var(--ok)">[OK] 暂无未解决工单</div></div>`;
+
+  // CW data (populated by separate /api/cloudwatch call)
+  const cwModels = a.cwModels||[];
+  const cwCost   = a.cwCost||{};
+  const costOff  = !!a.cwCostSkipped;
+  const invocations = cwModels.reduce((s,m)=>s+(Number(m.invocations)||0),0);
+  const tokens = cwModels.reduce((s,m)=>s+(Number(m.inputTokens)||0)+(Number(m.outputTokens)||0),0);
+  const hasCw = cwModels.length>0 || (cwCost.amount||0)>0;
+  const cwHtml = hasCw
+    ?`<div class="cw-grid">
+        ${cwCell(invocations,'调用次数','int')}
+        ${cwCell(tokens,'总 Tokens','int')}
+        ${costOff?'':cwCell(cwCost.amount||0,'Bedrock 成本','cost')}
+      </div>`
+    :`<div class="cw-grid"><div class="cw-cell" style="grid-column:1/-1;color:var(--muted);font-size:12px">本月暂无 Bedrock 调用${costOff?'（成本数据已关闭，不调用 Cost Explorer）':' / 成本数据'}</div></div>`;
+
+  // 服务配额（每个 region + 配额一项）
+  const cwQuotas = a.cwQuotas||[];
+  const quotaSec = `<div class="ticket-sec">
+    <div class="ticket-hdr">[配额] 服务配额（${cwQuotas.length}）</div>
+    ${cwQuotas.length
+      ?`<div class="cw-grid">${cwQuotas.map(q=>{
+          const err=q.error;
+          return `<div class="cw-cell">
+            <div class="cw-cell-val" style="${err?'color:var(--bad)':'color:var(--accent)'}">${err?'ERR':(q.value!=null?(q.value+' '+(q.unit||'')).trim():'—')}</div>
+            <div class="cw-cell-label">${esc(q.quotaName||q.quotaCode)}</div>
+            <div class="cw-cell-sub">${err?esc(err):esc(q.region+' · '+(q.adjustable?'可调整':'固定'))}</div>
+          </div>`;
+        }).join('')}</div>`
+      :`<div style="font-size:12px;color:var(--muted)">无配额数据</div>`}
+  </div>`;
+
+  // 账户健康探测（Bedrock 控制面 ListFoundationModels 只读探针）
+  const cwHealth = a.cwHealth||{};
+  const hb = cwHealth.bedrock||{};
+  const healthOk = hb.status==='ok';
+  const healthText = healthOk?('正常（'+hb.models+' 个模型可用）'):'异常 / 账户级限制';
+  const healthSec = `<div class="ticket-sec">
+    <div class="ticket-hdr">[健康] 账户健康探测</div>
+    <div class="kv-grid">
+      <div class="kv-row"><span class="kv-k">Bedrock 控制面探针</span>
+        <span class="kv-v ${healthOk?'ok':'err'}">${healthText}</span></div>
+      ${healthOk?'':`<div class="kv-row"><span class="kv-k">原因</span><span class="kv-v err">${esc(hb.message||'')}</span></div>`}
+    </div>
+  </div>`;
+
+  return `<div class="acct-card" id="acct-card-${a._idx}">
+    <div class="acct-hdr">
+      <span class="acct-name">${acctName}</span>
+      <div class="acct-meta">${acctMeta}</div>
+    </div>
+    <div class="acct-body">
+      <div class="model-grid">${brCells}${mtCells}</div>
+      ${cwHtml}
+      ${quotaSec}
+      ${healthSec}
+      ${verified?ticketHtml:''}
+    </div>
+  </div>`;
+}
+
+// ── dashboard ────────────────────────────────────────────────────────────────
+let _winMin = parseInt(localStorage.getItem(LS_KEY_WIN)||'43200');
+$('dashWinSelect').value = _winMin;
+
+// 成本开关：默认关闭（Cost Explorer 会计费）。状态持久化在 localStorage。
+let _costOn = localStorage.getItem(LS_KEY_COST) === '1';
+function _renderCostLabel(){ $('dashCostLabel').textContent = '[成本] ' + (_costOn ? '开启' : '关闭'); }
+_renderCostLabel();
+$('dashCostToggle').onclick = () => {
+  _costOn = !_costOn;
+  localStorage.setItem(LS_KEY_COST, _costOn ? '1' : '0');
+  _renderCostLabel();
+  $runDashboard();
+};
+
+async function $runDashboard(){
+  const accts = loadAccts();
+  if(!accts.length){
+    $('dashEmpty').style.display='block';
+    $('dashList').innerHTML='';
+    $('dashCount').style.display='none';
+    return;
+  }
+  $('dashEmpty').style.display='none';
+  $('dashCount').style.display='inline-flex';
+  $('dashCount').textContent=accts.length+' 账户';
+  // show skeletons
+  $('dashList').innerHTML=accts.map((a,i)=>`<div class="acct-card">
+    <div class="acct-hdr"><span class="acct-name">${esc(a.name||a.access_key)}</span></div>
+    <div class="acct-body" style="display:flex;align-items:center;justify-content:center;min-height:120px">
+      <span style="color:var(--muted)"><span class="spinner"></span> 测试中（模型 + CloudWatch）…</span>
+    </div></div>`).join('');
+
+  const winMin = parseInt($('dashWinSelect').value)||43200;
+  localStorage.setItem(LS_KEY_WIN, winMin);
+  const winLabel = $('dashWinSelect').selectedOptions[0].text;
+  $('dashWin').textContent = winLabel;
+
+  // Run dashboard API (model tests + tickets) and cloudwatch in parallel
+  const dashPayload = accts.map(a=>({
+    name: a.name, access_key:a.access_key, secret_key:a.secret_key,
+    session_token:'', region:a.region, windowMinutes: winMin,
+  }));
+  const cwPayload = accts.map(a=>({
+    name: a.name, access_key:a.access_key, secret_key:a.secret_key,
+    session_token:'', region:a.region, windowMinutes: winMin,
+    includeCost: _costOn,
+  }));
+
+  let dashData, cwData;
+  try {
+    [dashData, cwData] = await Promise.all([
+      api('/api/dashboard', dashPayload),
+      api('/api/cloudwatch', cwPayload),
+    ]);
+  } catch(e) {
+    $('dashList').innerHTML = `<div class="acct-card"><div class="acct-body" style="min-height:120px">
+      <span style="color:var(--bad)">加载失败：${esc(String(e&&e.message||e))}</span></div></div>`;
+    return;
+  }
+  if (dashData.error) {
+    $('dashList').innerHTML = `<div class="acct-card"><div class="acct-body" style="min-height:120px">
+      <span style="color:var(--bad)">看板加载失败：${esc(dashData.error)}</span></div></div>`;
+    return;
+  }
+  const accounts = dashData.accounts||[];
+
+  // Merge cloudwatch (handle both array and single-object responses)
+  let cwAccounts;
+  if (Array.isArray(cwData)) cwAccounts = cwData;
+  else if (cwData && cwData.accounts) cwAccounts = cwData.accounts;
+  else if (cwData && cwData.accountLabel) cwAccounts = [cwData];
+  else cwAccounts = [];
+  const cwMap = {};
+  cwAccounts.forEach(c=>{ cwMap[c.accountLabel||'']=c; });
+
+  // Merge and render
+  accounts.forEach((a,i)=>{
+    a._idx = i;
+    const cw = cwMap[a.name]||cwMap[a.access_key]||{};
+    a.cwModels = cw.models||[];
+    a.cwCost   = cw.cost||{};
+    a.cwCostSkipped = !!cw.costSkipped;
+    a.cwQuotas = cw.quotas||[];
+    a.cwHealth = cw.health||{};
+    if (cw.errors && cw.errors.length) a.cwErrors = cw.errors;
+  });
+
+  try {
+    $('dashList').innerHTML = accounts.map(renderAcctCard).join('');
+  } catch(e) {
+    console.error('renderAcctCard error', e);
+    $('dashList').innerHTML = `<div class="acct-card"><div class="acct-body"><span style="color:var(--bad)">页面渲染出错：${esc(e&&e.message||String(e))}</span></div></div>`;
+    return;
+  }
+  $('dashLast').textContent='上次刷新: '+ts();
+  setLive(accounts.some(a=>a.verified), accounts.length);
+}
+
+function setLive(ok,total){
+  const dot=$('liveDot');
+  dot.className='status-dot'+(ok?' live':' off');
+  $('liveLabel').textContent=ok?`${total} 账户已加载`:'加载失败';
+}
+
+$('dashRefresh').onclick=$runDashboard;
+let autoOn=false;
+$('dashAuto').onclick=function(){
+  autoOn=!autoOn;
+  $('dashAutoLabel').textContent=autoOn?'[AUTO] 自动刷新 ON':'[AUTO] 自动刷新 OFF';
+  if(autoOn){autoTimer=setInterval($runDashboard,AUTO_MS);}
+  else{clearInterval(autoTimer);autoTimer=null;}
+};
+
+// ── account management ───────────────────────────────────────────────────────
+function renderAccts(){
+  const list=loadAccts(), cur=activeId();
+  $('acctEmpty').style.display=list.length?'none':'block';
+  $('acctList').innerHTML=list.length
+    ?list.map(a=>`<div class="acct-item ${a.id===cur?'active':''}">
+        <div class="acct-item-info">
+          <div class="acct-item-name">${esc(a.name||'未命名')}</div>
+          <div class="acct-item-meta"><code>${esc(maskAk(a.access_key))}</code> · ${esc(a.region)}</div>
+        </div>
+        ${a.id===cur?'<span class="cur-tag">当前</span>':''}
+        <button class="btn ghost sm" onclick="setCurAcct('${a.id}')">设为当前</button>
+        <button class="btn danger sm" onclick="delAcct('${a.id}')">删除</button>
+      </div>`).join('')
+    :'';
+}
+function setCurAcct(id){localStorage.setItem(LS_KEY_ACTIVE,id);renderAccts();}
+function delAcct(id){
+  let list=loadAccts().filter(x=>x.id!==id);saveAccts(list);
+  if(activeId()===id)localStorage.removeItem(LS_KEY_ACTIVE);
+  renderAccts();
+}
+
+$('eye').onclick=()=>{const i=$('newSk');i.type=i.type==='password'?'text':'password';$('eye').textContent=i.type==='text'?'隐藏':'显示';};
+
+// 批量添加账户：支持两种格式（每行）
+//   逗号分隔: AK,SK 或 名称,AK,SK
+//   空格分隔: AK SK 或 名称 AK SK （SK 含 + / 等符号时推荐用空格，避免与逗号冲突）
+$('bulkAddBtn').onclick=async()=>{
+  const region=$('bulkRegion').value.trim()||'us-east-1';
+  const lines=$('bulkAkSk').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  if(!lines.length){$('bulkResult').innerHTML='<div class="err-msg">请粘贴至少一个账户（AK SK 或 名称 AK SK，或逗号分隔）。</div>';return;}
+  loading($('bulkResult'));
+  let ok=0, fail=0; const msgs=[];
+  const accts=loadAccts();
+  for(const line of lines){
+    // 优先按逗号分（向后兼容），否则按空白分（SK 含 + / 等）
+    let parts = line.includes(',') ? line.split(',').map(s=>s.trim())
+                                   : line.split(/\s+/).map(s=>s.trim()).filter(Boolean);
+    let name='', ak, sk;
+    if(parts.length>=3){ name=parts[0]; ak=parts[1]; sk=parts[2]; }
+    else if(parts.length===2){ ak=parts[0]; sk=parts[1]; }
+    else { fail++; msgs.push('格式错误：'+esc(line)); continue; }
+    if(!ak||!sk){ fail++; msgs.push('缺少 AK/SK：'+esc(line)); continue; }
+    try{
+      const st=await api('/api/sts-name',{access_key:ak,secret_key:sk,session_token:'',region});
+      const acctName=(name||(st.ok&&st.name)||'Account-'+(st.accountId||''));
+      const v=await api('/api/auth',{access_key:ak,secret_key:sk,session_token:'',region});
+      if(v.valid){
+        const newAcct={id:Date.now().toString()+'-'+ok, name:acctName, access_key:ak, secret_key:sk, region};
+        accts.push(newAcct);saveAccts(accts);
+        if(!activeId())localStorage.setItem(LS_KEY_ACTIVE,newAcct.id);
+        ok++; msgs.push('[OK] '+esc(acctName)+'（账户 '+v.account+'）');
+      }else{ fail++; msgs.push('[ERR] '+esc(ak.slice(0,8)+'...')+' 验证失败：'+esc(v.error||'')); }
+    }catch(e){ fail++; msgs.push('[ERR] '+esc(ak.slice(0,8)+'...')+' 请求异常：'+esc(String(e&&e.message||e))); }
+  }
+  renderAccts();
+  $('bulkResult').innerHTML=`<div class="${fail?'err-msg':'success'}">批量完成：成功 ${ok} 个，失败 ${fail} 个</div>`
+    + msgs.map(m=>`<div style="font-size:12px">${m}</div>`).join('');
+  $('bulkAkSk').value='';
+};
+
+$('addBtn').onclick=async()=>{
+  const ak=$('newAk').value.trim(), sk=$('newSk').value.trim();
+  const region=$('newRegion').value.trim()||'us-east-1';
+  if(!ak||!sk){$('addResult').innerHTML='<div class="err-msg">请填写 Access Key ID 和 Secret。</div>';return;}
+  loading($('addResult'));
+  // 先查询 STS 真实账户名
+  let name = $('newName').value.trim();
+  try {
+    const r = await api('/api/sts-name',{access_key:ak,secret_key:sk,session_token:'',region});
+    if(r.ok && r.name) name = r.name;
+  } catch(e){ /* use manual name */ }
+  // 再验证
+  const v = await api('/api/auth',{access_key:ak,secret_key:sk,session_token:'',region});
+  if(v.valid){
+    const accts=loadAccts();
+    const newAcct={id:Date.now().toString(),name:name||v.name||'Account-'+v.account,
+                   access_key:ak,secret_key:sk,region};
+    accts.push(newAcct);saveAccts(accts);
+    if(!activeId())localStorage.setItem(LS_KEY_ACTIVE,newAcct.id);
+    renderAccts();$('newAk').value='';$('newSk').value='';$('newName').value='';
+    $('addResult').innerHTML=`<div class="success">[OK] 已添加：${esc(newAcct.name)}（账户 ${v.account}）</div>`;
+  }else{$('addResult').innerHTML=`<div class="err-msg">[ERR] 验证失败：${esc(v.error||'未知错误')}</div>`;}
+};
+renderAccts();
+
+// ── mantle / bedrock tabs ────────────────────────────────────────────────────
+async function runMantle(filter){
+  const c=getCreds();if(!c){$('mResult').innerHTML='<div class="err-msg">请先选择一个账户。</div>';return;}
+  loading($('mResult'));
+  const d=await api('/api/mantle',{...c,filter:filter?filter.split(/\s+/).filter(Boolean):[],prompt:$('mPrompt').value.trim()||'hi'});
+  renderResults($('mResult'),d);
+}
+$('mRun').onclick=()=>runMantle($('mFilter').value);
+$('mAll').onclick=()=>{$('mFilter').value='';runMantle('');};
+
+$('bRun').onclick=async()=>{
+  const c=getCreds();if(!c){$('bResult').innerHTML='<div class="err-msg">请先选择一个账户。</div>';return;}
+  loading($('bResult'));
+  const d=await api('/api/bedrock',{...c,filter:$('bFilter').value.split(/\s+/).filter(Boolean),prompt:$('bPrompt').value.trim()||'hi'});
+  renderResults($('bResult'),d);
+};
+
+function renderResults(el,d){
+  if(d.error){el.innerHTML=`<div class="err-msg">${esc(d.error)}</div>`;return;}
+  const r=d.results||[];if(!r.length){el.innerHTML='<div class="empty">无结果。</div>';return;}
+  el.innerHTML=`<div class="summary">共 ${d.total} 个，成功 <strong style="color:var(--ok)">${d.ok}</strong> 个，失败 <strong style="color:var(--err)">${d.total-d.ok}</strong> 个</div>
+  <table><thead><tr><th>#</th><th>模型</th><th>状态</th><th>耗时</th><th>响应 / 错误</th></tr></thead><tbody>
+  ${r.map((x,i)=>{
+    const tag=x.ok?'<span class="badge ok">OK</span>':'<span class="badge err">FAIL</span>';
+    const extra=x.ok&&x.route&&x.route.includes('/openai')?' <span class="route-tag">备用路由</span>':'';
+    const extra2=x.via==='inference-profile'?' <span class="badge info">推理配置</span>':'';
+    // 失败时显式展示 route 与 err（便于定位），成功时展示响应文本
+    const detail=x.ok
+      ? `<div class="resp">${esc(x.text)}</div>`
+      : `<div class="errmsg"><strong>route:</strong> <code>${esc(x.route||'—')}</code></div>`
+        + (x.err?`<div class="errmsg"><strong>err:</strong> ${esc(x.err)}</div>`:'');
+    return`<tr><td>${i+1}</td><td><code>${esc(x.model||x.modelId)}</code></td><td>${tag}${extra}${extra2}</td>
+      <td>${x.elapsed.toFixed(2)}s</td><td>${detail}</td></tr>`;
+  }).join('')}</tbody></table>`;
+}
+
+// ── tickets ──────────────────────────────────────────────────────────────────
+function renderTickets(el,d){
+  if(d.error){el.innerHTML=`<div class="err-msg">${esc(d.error)}</div>`;return;}
+  const cs=d.cases||[];if(!cs.length){el.innerHTML='<div class="empty">无匹配工单。</div>';return;}
+  el.innerHTML=cs.map(t=>`<div class="ticket-row" style="margin-top:12px">
+    <div class="ticket-top">${ticketStatusTag(t.status)}<span class="badge ${sevClass(t.severityCode)}">${esc(t.severityCode||'—')}</span>
+      <span class="ticket-subj">${esc(t.subject)}</span></div>
+    <div class="ticket-meta">
+      <span>[ID] <code>${esc(t.caseId||'')}</code>${t.displayId?` (展示ID: ${esc(t.displayId)})`:''}</span>
+      <span>[TAG] ${esc(t.serviceCode||'')} · ${esc(t.categoryCode||'')}</span>
+      <span>[TIME] ${esc((t.latestMessageTime||t.timeCreated||'').replace('T',' ').slice(0,16))}</span>
+    </div>${t.latestMessage?`<div class="ticket-msg">${esc(t.latestMessage)}</div>`:''}
+  </div>`).join('');
+}
+
+$('tRun').onclick=async()=>{
+  const c=getCreds();if(!c){$('tResult').innerHTML='<div class="err-msg">请先选择一个账户。</div>';return;}
+  loading($('tResult'));
+  const d=await api('/api/tickets',{...c,filter:$('tFilter').value.split(/\s+/).filter(Boolean),full:$('tFull').checked});
+  renderTickets($('tResult'),d);
+};
+$('tAll').onclick=async()=>{
+  const accts=loadAccts();if(!accts.length){$('tResult').innerHTML='<div class="empty">没有保存的账户。</div>';return;}
+  loading($('tResult'));
+  const payload={accounts:accts.map(a=>({name:a.name,access_key:a.access_key,secret_key:a.secret_key,
+    session_token:'',region:a.region,filter:$('tFilter').value.split(/\s+/).filter(Boolean),full:$('tFull').checked}))};
+  const d=await api('/api/tickets-all',payload);
+  const groups=d.accounts||[];
+  let html='';
+  groups.forEach(g=>{
+    html+=`<div style="margin-top:18px"><div style="font-size:12px;font-weight:700;color:var(--accent2);margin-bottom:8px">
+      ${esc(g.name)} ${g.account?`· 账户 ${esc(g.account)}`:''}</div>`;
+    if(g.error)html+=`<div class="err-msg">[ERR] ${esc(g.error)}</div>`;
+    else if(!g.cases||!g.cases.length)html+=`<div style="font-size:12px;color:var(--muted);padding:8px 0">无匹配工单。</div>`;
+    else{const tmp=document.createElement('div');renderTickets(tmp,{cases:g.cases});html+=tmp.innerHTML;}
+    html+='</div>';
+  });
+  $('tResult').innerHTML=html;
+};
+
+// ── global error display ─────────────────────────────────────────────────────
+window.onerror = function(msg, url, line, col, err){
+  const el = document.getElementById('dashList') || document.body;
+  const txt = `JS 错误: ${msg} (line ${line})`;
+  console.error(txt, err);
+  const div = document.createElement('div');
+  div.style.cssText = 'color:#ff6b6b;background:#1b0b0b;border:1px solid #ff4444;padding:12px;margin:12px;border-radius:8px;font-family:monospace;white-space:pre-wrap';
+  div.textContent = txt;
+  el.prepend ? el.prepend(div) : el.appendChild(div);
+};
+
+// ── auto-load ────────────────────────────────────────────────────────────────
+$runDashboard();
+</script>
+</body>
+</html>
