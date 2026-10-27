@@ -305,3 +305,31 @@ def read_tickets(ak, sk, st, region, cfg, case_filter=None, full=False):
         except Exception as e:
             out[0]["communicationsError"] = str(e)
     return {"error": "", "cases": out}
+
+
+def reply_ticket(ak, sk, st, region, cfg, case_id, body):
+    """向指定 AWS Support 工单追加一条回复（communication）。
+    需要账户开通 Business/Enterprise Support 计划。
+    返回 {"ok": bool, "error": str}。"""
+    st = st or None
+    support_region = cfg.get("support_region", region)
+    client = boto3.client(
+        "support", region_name=support_region,
+        aws_access_key_id=ak, aws_secret_access_key=sk, aws_session_token=st,
+    )
+    try:
+        resp = client.add_communication_to_case(
+            caseId=case_id,
+            communicationBody=body,
+        )
+        ok = bool(resp.get("result", False))
+        return {"ok": ok, "error": "" if ok else "AWS 返回 result=False（回复未被接受）"}
+    except ClientError as e:
+        err = e.response["Error"]
+        if err.get("Code") in ("SubscriptionRequiredException", "MissingSubscription"):
+            return {"ok": False, "error": "AWS Support 不可用: 当前账户未开通 Support 计划 (Business/Enterprise)。"}
+        if err.get("Code") == "CaseIdNotFound":
+            return {"ok": False, "error": f"工单不存在: {case_id}"}
+        return {"ok": False, "error": f"{err.get('Code', '')}: {err.get('Message', e)}"}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}

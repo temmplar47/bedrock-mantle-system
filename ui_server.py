@@ -593,6 +593,20 @@ class Handler(BaseHTTPRequestHandler):
             _send_json(self, out)
             return
 
+        # ── /api/tickets-reply ───────────────────────────────────────────
+        if parsed.path == "/api/tickets-reply":
+            c = _get_creds(data)
+            case_id = (data.get("caseId") or "").strip()
+            body = (data.get("body") or "").strip()
+            if not case_id or not body:
+                _send_json(self, {"ok": False, "error": "caseId 与回复内容均不能为空"}, 400)
+                return
+            out = core.reply_ticket(c["access_key"], c["secret_key"],
+                                    c["session_token"], c["region"],
+                                    CONFIG, case_id, body)
+            _send_json(self, out)
+            return
+
         # ── /api/tickets-all ──────────────────────────────────────────────
         if parsed.path == "/api/tickets-all":
             if not isinstance(data, dict):
@@ -606,7 +620,11 @@ class Handler(BaseHTTPRequestHandler):
                 v = core.verify_credentials(c["access_key"], c["secret_key"],
                                              c["session_token"], c["region"])
                 entry = {"name": name, "account": v.get("account", ""),
-                         "error": "", "cases": []}
+                         "error": "", "cases": [],
+                         # 回显该账户凭证（仅本地浏览器↔本服务，供按账户回复使用）
+                         "creds": {"access_key": c["access_key"],
+                                   "secret_key": c["secret_key"],
+                                   "region": c["region"]}}
                 if not v["valid"]:
                     entry["error"] = v.get("error", "验证失败")
                     out.append(entry)

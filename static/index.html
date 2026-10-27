@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<title>Bedrock · Mantle · 多账户监控 v241026a</title>
+<title>Bedrock · Mantle · 多账户监控 v241027a</title>
 <style>
 :root{
   --bg:#0b0f1a; --panel:#131929; --panel2:#1b2235; --border:#252f48;
@@ -154,6 +154,15 @@ nav button.active{color:var(--accent);border-bottom-color:var(--accent)}
   background:var(--panel2);border-radius:7px;padding:7px 9px;
   display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
 }
+.ticket-reply{margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)}
+.reply-box{
+  width:100%;min-height:42px;resize:vertical;font-family:inherit;font-size:12px;
+  background:var(--panel2);color:var(--text);border:1px solid var(--border);
+  border-radius:7px;padding:7px 9px;box-sizing:border-box;
+}
+.reply-box:focus{outline:none;border-color:var(--accent2)}
+.ticket-reply-btns{display:flex;gap:8px;align-items:center;margin-top:6px}
+.reply-status{font-size:12px}
 
 /* cw metrics (from bedrock-dashboard) */
 .cw-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}
@@ -855,25 +864,51 @@ function renderResults(el,d){
 }
 
 // ── tickets ──────────────────────────────────────────────────────────────────
-function renderTickets(el,d){
+function renderTickets(el,d,creds){
   if(d.error){el.innerHTML=`<div class="err-msg">${esc(d.error)}</div>`;return;}
   const cs=d.cases||[];if(!cs.length){el.innerHTML='<div class="empty">无匹配工单。</div>';return;}
-  el.innerHTML=cs.map(t=>`<div class="ticket-row" style="margin-top:12px">
+  el.innerHTML=cs.map(t=>{
+    const rawCid=t.caseId||''; const cid=esc(rawCid);
+    return`<div class="ticket-row" style="margin-top:12px">
     <div class="ticket-top">${ticketStatusTag(t.status)}<span class="badge ${sevClass(t.severityCode)}">${esc(t.severityCode||'—')}</span>
       <span class="ticket-subj">${esc(t.subject)}</span></div>
     <div class="ticket-meta">
-      <span>[ID] <code>${esc(t.caseId||'')}</code>${t.displayId?` (展示ID: ${esc(t.displayId)})`:''}</span>
+      <span>[ID] <code>${cid}</code>${t.displayId?` (展示ID: ${esc(t.displayId)})`:''}</span>
       <span>[TAG] ${esc(t.serviceCode||'')} · ${esc(t.categoryCode||'')}</span>
       <span>[TIME] ${esc((t.latestMessageTime||t.timeCreated||'').replace('T',' ').slice(0,16))}</span>
     </div>${t.latestMessage?`<div class="ticket-msg">${esc(t.latestMessage)}</div>`:''}
-  </div>`).join('');
+    <div class="ticket-reply">
+      <textarea class="reply-box" id="reply-${rawCid}" rows="2" placeholder="输入回复内容，点击发送…"></textarea>
+      <div class="ticket-reply-btns">
+        <button class="btn sm reply-send" data-case="${rawCid}">发送回复</button>
+        <span class="reply-status" id="rstat-${rawCid}"></span>
+      </div>
+    </div>
+  </div>`;}).join('');
+  // 绑定回复按钮
+  el.querySelectorAll('.reply-send').forEach(btn=>{
+    btn.onclick=async()=>{
+      const cid=btn.getAttribute('data-case');
+      const box=document.getElementById('reply-'+cid);
+      const status=document.getElementById('rstat-'+cid);
+      const text=box.value.trim();
+      if(!text){status.textContent='请先输入回复内容';status.style.color='var(--err)';return;}
+      btn.disabled=true;status.textContent='发送中…';status.style.color='var(--muted)';
+      const c=creds||getCreds();
+      if(!c){status.textContent='无可用账户凭证';status.style.color='var(--err)';btn.disabled=false;return;}
+      const r=await api('/api/tickets-reply',{...c,caseId:cid,body:text});
+      if(r.ok){status.textContent='已发送';status.style.color='var(--ok)';box.value='';}
+      else{status.textContent='失败：'+(r.error||'未知错误');status.style.color='var(--err)';}
+      btn.disabled=false;
+    };
+  });
 }
 
 $('tRun').onclick=async()=>{
   const c=getCreds();if(!c){$('tResult').innerHTML='<div class="err-msg">请先选择一个账户。</div>';return;}
   loading($('tResult'));
   const d=await api('/api/tickets',{...c,filter:$('tFilter').value.split(/\s+/).filter(Boolean),full:$('tFull').checked});
-  renderTickets($('tResult'),d);
+  renderTickets($('tResult'),d,c);
 };
 $('tAll').onclick=async()=>{
   const accts=loadAccts();if(!accts.length){$('tResult').innerHTML='<div class="empty">没有保存的账户。</div>';return;}
@@ -888,7 +923,7 @@ $('tAll').onclick=async()=>{
       ${esc(g.name)} ${g.account?`· 账户 ${esc(g.account)}`:''}</div>`;
     if(g.error)html+=`<div class="err-msg">[ERR] ${esc(g.error)}</div>`;
     else if(!g.cases||!g.cases.length)html+=`<div style="font-size:12px;color:var(--muted);padding:8px 0">无匹配工单。</div>`;
-    else{const tmp=document.createElement('div');renderTickets(tmp,{cases:g.cases});html+=tmp.innerHTML;}
+    else{const tmp=document.createElement('div');renderTickets(tmp,{cases:g.cases},g.creds);html+=tmp.innerHTML;}
     html+='</div>';
   });
   $('tResult').innerHTML=html;
